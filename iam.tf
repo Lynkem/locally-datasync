@@ -22,7 +22,7 @@ data "aws_iam_policy_document" "datasync_trust" {
     }
   }
 }
-
+/*
 data "aws_iam_policy_document" "datasync_service" {
   statement {
     sid    = "LocallyDataSyncBucketLevelAccess"
@@ -48,7 +48,7 @@ data "aws_iam_policy_document" "datasync_service" {
       "s3:PutObject",
       "s3:DeleteObjectTagging"
     ]
-    resources = ["${data.aws_s3_bucket.target.arn}${local.target_path}/*"]
+    resources = ["${data.aws_s3_bucket.target.arn}${local.sync_configs.inventory.target_path}*"]
   }
 }
 
@@ -74,6 +74,7 @@ resource "aws_iam_role_policy_attachment" "datasync_service" {
   role       = aws_iam_role.datasync_service.name
   policy_arn = aws_iam_policy.datasync_service.arn
 }
+*/
 
 data "aws_iam_policy_document" "lambda_onoff_trust" {
   statement {
@@ -127,4 +128,64 @@ resource "aws_iam_role_policy_attachment" "lambda_onoff" {
 
   role       = aws_iam_role.lambda_onoff.name
   policy_arn = each.value
+}
+
+data "aws_iam_policy_document" "datasync_s3_access" {
+  for_each = local.locally_iterator
+
+  statement {
+    sid    = "Locally${title(each.value)}DataSyncBucketLevelAccess"
+    effect = "Allow"
+    actions = [
+      "s3:GetBucketLocation",
+      "s3:ListBucket",
+      "s3:ListBucketMultipartUploads"
+    ]
+    resources = [data.aws_s3_bucket.target.arn]
+  }
+
+  statement {
+    sid    = "Locally${title(each.value)}DataSyncObjectLevelAccess"
+    effect = "Allow"
+    actions = [
+      "s3:AbortMultipartUpload",
+      "s3:DeleteObject",
+      "s3:GetObject",
+      "s3:ListMultipartUploadParts",
+      "s3:GetObjectTagging",
+      "s3:PutObjectTagging",
+      "s3:PutObject",
+      "s3:DeleteObjectTagging"
+    ]
+    resources = ["${data.aws_s3_bucket.target.arn}${local.sync_configs[each.value].target_path}*"]
+  }
+}
+
+resource "aws_iam_policy" "datasync_s3_access" {
+  for_each = local.locally_iterator
+
+  name        = "Locally${title(each.value)}DataSyncPolicy"
+  description = "Policy for Locally ${title(each.value)} DataSync role to copy files from Locally s Google Storage into the lynkemprod S3 bucket."
+  policy      = data.aws_iam_policy_document.datasync_s3_access[each.value].json
+  tags = {
+    Name = "Locally${title(each.value)}DataSyncPolicy"
+  }
+}
+
+resource "aws_iam_role" "locally_datasync_service" {
+  for_each = local.locally_iterator
+
+  name               = "Locally${title(each.value)}DataSyncServiceRole"
+  description        = "Service role for AWS DataSync for the Locally ${title(each.value)} to lynkemprod S3 bucket transfer"
+  assume_role_policy = data.aws_iam_policy_document.datasync_trust.json
+  tags = {
+    Name = "Locally${title(each.value)}DataSyncServiceRole"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "locally_datasync_service" {
+  for_each = local.locally_iterator
+
+  role       = aws_iam_role.locally_datasync_service[each.value].name
+  policy_arn = aws_iam_policy.datasync_s3_access[each.value].arn
 }

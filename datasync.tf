@@ -1,35 +1,36 @@
-resource "aws_datasync_location_s3" "target" {
+resource "aws_datasync_location_object_storage" "source" {
+  for_each = local.locally_iterator
+
+  agent_arns      = [aws_datasync_agent.ec2.arn]
+  server_hostname = local.sync_configs[each.value].source_hostname
+  bucket_name     = local.sync_configs[each.value].source_bucket
+  server_protocol = "HTTPS"
+  server_port     = 443
+  subdirectory    = local.sync_configs[each.value].source_path
+  access_key      = var.googleapis_access_key
+  secret_key      = var.googleapis_secret_key
+
+  tags = {
+    Name = "Locally ${local.title_keys[each.value]} DataSync Source"
+  }
+}
+
+resource "aws_datasync_location_s3" "destination" {
+  for_each = local.locally_iterator
+
   s3_bucket_arn    = data.aws_s3_bucket.target.arn
-  subdirectory     = "${local.target_path}/"
+  subdirectory     = local.sync_configs[each.value].target_path
   agent_arns       = []
   s3_storage_class = "STANDARD"
 
   s3_config {
-    bucket_access_role_arn = aws_iam_role.datasync_service.arn
+    bucket_access_role_arn = aws_iam_role.locally_datasync_service[each.value].arn
   }
 
   tags = {
-    Name = "Locally DataSync Target"
+    Name = "Locally ${local.title_keys[each.value]} DataSync Destination"
   }
 }
-
-resource "aws_datasync_location_object_storage" "source" {
-  agent_arns      = [aws_datasync_agent.ec2.arn]
-  server_hostname = "storage.googleapis.com"
-  bucket_name     = "brandslice-stock"
-  server_protocol = "HTTPS"
-  server_port     = 443
-  subdirectory    = "/brandslice-stock/"
-  access_key      = var.googleapis_access_key
-  secret_key      = var.googleapis_secret_key
-
-
-  tags = {
-    Name = "Locally DataSync Source"
-  }
-}
-
-
 resource "aws_vpc_endpoint" "ds" {
   service_name        = "com.amazonaws.us-east-1.datasync"
   vpc_id              = data.aws_vpc.main.id
@@ -58,6 +59,82 @@ resource "aws_datasync_agent" "ec2" {
 
   tags = {
     Name = "Locally DataSync Agent"
+  }
+}
+
+resource "aws_datasync_task" "locally" {
+  for_each = local.locally_iterator
+
+  name                     = "Locally ${local.title_keys[each.value]} Data Sync"
+  source_location_arn      = aws_datasync_location_object_storage.source[each.value].arn
+  destination_location_arn = aws_datasync_location_s3.destination[each.value].arn
+  cloudwatch_log_group_arn = data.aws_cloudwatch_log_group.ds.arn
+
+  dynamic "excludes" {
+    for_each = toset(local.sync_configs[each.value].excludes)
+
+    content {
+      filter_type = excludes.value["filter_type"]
+      value       = excludes.value["value"]
+    }
+  }
+
+  schedule {
+    schedule_expression = local.sync_configs[each.value].sync_schedule
+  }
+
+  options {
+    atime                          = "BEST_EFFORT"
+    bytes_per_second               = -1
+    gid                            = "NONE"
+    log_level                      = "BASIC"
+    mtime                          = "PRESERVE"
+    overwrite_mode                 = "ALWAYS"
+    posix_permissions              = "NONE"
+    preserve_deleted_files         = "PRESERVE"
+    preserve_devices               = "NONE"
+    security_descriptor_copy_flags = "NONE"
+    task_queueing                  = "ENABLED"
+    transfer_mode                  = "CHANGED"
+    uid                            = "NONE"
+    verify_mode                    = "ONLY_FILES_TRANSFERRED"
+  }
+
+  tags = {
+    Name = "Locally ${local.title_keys[each.value]} DataSync"
+  }
+}
+
+/*
+resource "aws_datasync_task" "catalog_weekly" {
+  source_location_arn      = aws_datasync_location_object_storage.catalog_source.arn
+  destination_location_arn = aws_datasync_location_s3.destination["catalog"].arn
+  name                     = "Locally Catalog Weekly Sync"
+  cloudwatch_log_group_arn = data.aws_cloudwatch_log_group.ds.arn
+
+  schedule {
+    schedule_expression = "cron(0 2 ? * MON *)"
+  }
+
+  options {
+    posix_permissions              = "NONE"
+    gid                            = "NONE"
+    uid                            = "NONE"
+    atime                          = "BEST_EFFORT"
+    bytes_per_second               = -1
+    log_level                      = "BASIC"
+    mtime                          = "PRESERVE"
+    overwrite_mode                 = "ALWAYS"
+    preserve_deleted_files         = "PRESERVE"
+    preserve_devices               = "NONE"
+    security_descriptor_copy_flags = "NONE"
+    task_queueing                  = "ENABLED"
+    transfer_mode                  = "CHANGED"
+    verify_mode                    = "ONLY_FILES_TRANSFERRED"
+  }
+
+  tags = {
+    Name = "Locally Catalog DailySync"
   }
 }
 
@@ -97,7 +174,7 @@ resource "aws_datasync_task" "daily" {
     Name = "Locally Daily Sync"
   }
 }
-
+*/
 data "aws_cloudwatch_log_group" "ds" {
   name = "/aws/datasync"
 }

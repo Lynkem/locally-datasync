@@ -46,5 +46,38 @@ data "aws_subnet" "use1a" {
 }
 
 locals {
-  target_path = "/Inventory_Data_Uploads/Locally_data/stock_inventory"
+  sync_configs = {
+    inventory = {
+      source_bucket        = "brandslice-stock"
+      source_path          = "/brandslice-stock/"
+      source_hostname      = "storage.googleapis.com"
+      target_bucket_arn    = data.aws_s3_bucket.target.arn
+      target_path          = "/Inventory_Data_Uploads/Locally_data/stock_inventory/"
+      sync_schedule        = "cron(15 8 * * ? *)"
+      agent_start_schedule = "cron(0 4 * * ? *)"
+      excludes             = [{ filter_type = "SIMPLE_PATTERN", value = "/master-000000000000.csv" }]
+    }
+    catalog = {
+      source_bucket        = "all-product-catalogs"
+      source_path          = "/all-product-catalogs/"
+      source_hostname      = "storage.googleapis.com"
+      target_bucket_arn    = data.aws_s3_bucket.target.arn
+      target_path          = "/Inventory_Data_Uploads/Locally_data/Product_Catalogs/"
+      sync_schedule        = "cron(0 2 ? * MON *)"
+      agent_start_schedule = "cron(45 21 ? * SUN *)"
+      excludes             = []
+    }
+    roster = {
+      source_bucket        = "brandslice-stores"
+      source_path          = "/brandslice-stores/"
+      source_hostname      = "storage.googleapis.com"
+      target_bucket_arn    = data.aws_s3_bucket.target.arn
+      target_path          = "/Inventory_Data_Uploads/Locally_data/Roster_file/"
+      sync_schedule        = "cron(45 4 * * ? *)"
+      agent_start_schedule = "cron(30 0 * * ? *)"
+      excludes             = []
+    }
+  }
+  title_keys       = { for k in keys(local.sync_configs) : k => title(k) }
+  locally_iterator = toset(keys(local.sync_configs))
 }
